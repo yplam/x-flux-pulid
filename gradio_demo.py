@@ -111,7 +111,7 @@ def create_demo(
         offload: bool = False,
         ckpt_dir: str = "",
     ):
-    xflux_pipeline = XFluxPipeline(model_type, device, offload)
+    xflux_pipeline = XFluxPipeline(model_type, device)
     checkpoints = sorted(Path(ckpt_dir).glob("*.safetensors"))
 
     with gr.Blocks() as demo:
@@ -120,7 +120,8 @@ def create_demo(
             with gr.Row():
                 with gr.Column():
                     prompt = gr.Textbox(label="Prompt", value="handsome woman in the city")
-
+                    id_image = gr.Image(label="ID Image")
+                    id_weight = gr.Slider(0.0, 3.0, 1, step=0.05, label="id weight")
                     with gr.Accordion("Generation Options", open=False):
                         with gr.Row():
                             width = gr.Slider(512, 2048, 1024, step=16, label="Width")
@@ -163,7 +164,7 @@ def create_demo(
                     output_image = gr.Image(label="Generated Image")
                     download_btn = gr.File(label="Download full-resolution")
 
-            inputs = [prompt, image_prompt, controlnet_image, width, height, guidance,
+            inputs = [prompt, id_image, id_weight, image_prompt, controlnet_image, width, height, guidance,
                     num_steps, seed, true_gs, ip_scale, neg_ip_scale, neg_prompt,
                     neg_image_prompt, timestep_to_start_cfg, control_type, control_weight,
                     lora_weight, local_path, lora_local_path, ip_local_path
@@ -198,11 +199,11 @@ def create_demo(
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(description="Flux")
-    parser.add_argument("--name", type=str, default="flux-dev", help="Model name")
+    parser.add_argument("--name", type=str, default="flux-dev-fp8", help="Model name")
     parser.add_argument("--device", type=str, default="cuda" if torch.cuda.is_available() else "cpu", help="Device to use")
     parser.add_argument("--offload", action="store_true", help="Offload model to CPU when not in use")
     parser.add_argument("--share", action="store_true", help="Create a public link to your demo")
-    parser.add_argument("--ckpt_dir", type=str, default=".", help="Folder with checkpoints in safetensors format")
+    parser.add_argument("--ckpt_dir", type=str, default="./models", help="Folder with checkpoints in safetensors format")
     args = parser.parse_args()
 
     demo = create_demo(args.name, args.device, args.offload, args.ckpt_dir)

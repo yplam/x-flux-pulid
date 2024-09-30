@@ -114,11 +114,17 @@ def denoise(
     image_proj: Tensor=None, 
     neg_image_proj: Tensor=None, 
     ip_scale: Tensor | float = 1.0,
-    neg_ip_scale: Tensor | float = 1.0
+    neg_ip_scale: Tensor | float = 1.0,
+    id_embeddings=None,
+    start_step=0,
+    id_weight=1.0,
+    uncond_id=None,
+    true_cfg=1.0
 ):
     i = 0
     # this is ignored for schnell
     guidance_vec = torch.full((img.shape[0],), guidance, device=img.device, dtype=img.dtype)
+    use_true_cfg = abs(true_cfg - 1.0) > 1e-2
     for t_curr, t_prev in zip(timesteps[:-1], timesteps[1:]):
         t_vec = torch.full((img.shape[0],), t_curr, dtype=img.dtype, device=img.device)
         pred = model(
@@ -130,9 +136,11 @@ def denoise(
             timesteps=t_vec,
             guidance=guidance_vec,
             image_proj=image_proj,
-            ip_scale=ip_scale, 
+            ip_scale=ip_scale,
+            id=id_embeddings if i >= start_step else None,
+            id_weight=id_weight,
         )
-        if i >= timestep_to_start_cfg:
+        if use_true_cfg and i >= timestep_to_start_cfg:
             neg_pred = model(
                 img=img,
                 img_ids=img_ids,
@@ -142,7 +150,9 @@ def denoise(
                 timesteps=t_vec,
                 guidance=guidance_vec, 
                 image_proj=neg_image_proj,
-                ip_scale=neg_ip_scale, 
+                ip_scale=neg_ip_scale,
+                id=uncond_id if i >= start_step else None,
+                id_weight=id_weight,
             )     
             pred = neg_pred + true_gs * (pred - neg_pred)
         img = img + (t_prev - t_curr) * pred

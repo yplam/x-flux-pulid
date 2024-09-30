@@ -77,6 +77,10 @@ class Flux(nn.Module):
         self.final_layer = LastLayer(self.hidden_size, 1, self.out_channels)
         self.gradient_checkpointing = False
 
+        self.pulid_ca = None
+        self.pulid_double_interval = 2
+        self.pulid_single_interval = 4
+
     def _set_gradient_checkpointing(self, module, value=False):
         if hasattr(module, "gradient_checkpointing"):
             module.gradient_checkpointing = value
@@ -145,7 +149,9 @@ class Flux(nn.Module):
         block_controlnet_hidden_states=None,
         guidance: Tensor | None = None,
         image_proj: Tensor | None = None, 
-        ip_scale: Tensor | float = 1.0, 
+        ip_scale: Tensor | float = 1.0,
+        id: Tensor = None,
+        id_weight: float = 1.0,
     ) -> Tensor:
         if img.ndim != 3 or txt.ndim != 3:
             raise ValueError("Input img and txt tensors must have 3 dimensions.")
@@ -164,6 +170,8 @@ class Flux(nn.Module):
         pe = self.pe_embedder(ids)
         if block_controlnet_hidden_states is not None:
             controlnet_depth = len(block_controlnet_hidden_states)
+
+        ca_idx = 0
         for index_block, block in enumerate(self.double_blocks):
             if self.training and self.gradient_checkpointing:
 
@@ -195,13 +203,16 @@ class Flux(nn.Module):
                     image_proj=image_proj,
                     ip_scale=ip_scale, 
                 )
+                if index_block % self.pulid_double_interval == 0 and id is not None and self.pulid_ca is not None:
+                    img = img + id_weight * self.pulid_ca[ca_idx](id, img)
+                    ca_idx += 1
             # controlnet residual
             if block_controlnet_hidden_states is not None:
                 img = img + block_controlnet_hidden_states[index_block % 2]
 
 
         img = torch.cat((txt, img), 1)
-        for block in self.single_blocks:
+        for index_block, block in enumerate(self.single_blocks):
             if self.training and self.gradient_checkpointing:
 
                 def create_custom_forward(module, return_dict=None):
@@ -221,7 +232,17 @@ class Flux(nn.Module):
                     pe,
                 )
             else:
-                img = block(img, vec=vec, pe=pe)
+                if self.pulid_ca is not None:
+                    x = block(img, vec=vec, pe=pe)
+                    real_img, txt = x[:, txt.shape[1]:, ...], x[:, :txt.shape[1], ...]
+
+                    if index_block % self.pulid_single_interval == 0 and id is not None:
+                        real_img = real_img + id_weight * self.pulid_ca[ca_idx](id, real_img)
+                        ca_idx += 1
+
+                    img = torch.cat((txt, real_img), 1)
+                else:
+                    img = block(img, vec=vec, pe=pe)
         img = img[:, txt.shape[1] :, ...]
 
         img = self.final_layer(img, vec)  # (N, T, patch_size ** 2 * out_channels)
